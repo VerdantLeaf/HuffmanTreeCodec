@@ -26,23 +26,25 @@ typedef struct HuffmanTree
 } HuffmanTree;
 
 // funcs
+int DoHTCompression(FILE *fp, bool optimized);
+int DoHTDecompression(FILE *fp, bool optimized);
+
 HuffmanTree *InitHT();
 int FreeHT(HuffmanTree *ht);
-
 int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht);
 int BuildHTFromFrequencies(HuffmanTree *ht);
-
 int GetCodeFromCharacter(HuffmanTree *ht, unsigned char value);
 int GetCharacterFromCode(HuffmanTree *ht, unsigned int code, unsigned char len);
-
 int WriteTreeToFile(HuffmanTree *ht, FILE *output);
 int WriteDataToFile(HuffmanTree *ht, FILE *input, FILE *output);
-
 HuffmanTree *ReadTreeFromFile(FILE *input);
 int ReadDataFromFile(HuffmanTree *ht, FILE *input, FILE *output);
-
 int PrintNodes(HuffmanTree *ht);
 int PrintNode(HuffmanTree *ht, int index, const char *opening);
 void PrintTreeInformation(HuffmanTree *ht, const char *opening);
+
+// optimized functions
+int WriteCompressedTreeToFile(HuffmanTree *ht, FILE *output);
+HuffmanTree *ReadCompressedTreeFromFile(FILE *input);
 
 #endif

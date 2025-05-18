@@ -1,16 +1,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <math.h>
 
-#include "ht.h"
+#include "ht-optimized.h"
 
 #define HTSIZE 512
 #define BYTEMAX 256
 
 /*
-    PRIVATE STUCTS
+    Optimizations completed:
+        * Decompression algorithm is ~40 lines shorter, by including final byte logic in main loop
+        * Compression now saves the count of nodes and "CompressedNode" - Saves ~7kB on compression of golfcore.ppm
+        * Writes all of the nodes in one fwrite, decreases exe size and improves size
+
+    OPTIMIZATIONS TO MAKE:
+    * Change how compression writes HCodes to prepend bits instead of append
+    *   Eliminating need to reverse N lower bits on decompression
+    * Reduce API to just compress and decompress
+    * Comprehensive devug/failure print function
+    *
+    *
 */
+
+#pragma region Private Structs
 
 /// @brief Struct to track frequency of value and if the value has been seen
 typedef struct
@@ -19,9 +31,20 @@ typedef struct
     int frequency;
 } SymbolReader;
 
-/*
-    PRIVATE FUNCTIONS:
-*/
+/// @brief Stores nodes in a way optimal for compression
+typedef struct
+{
+    // saves 12 bytes per node
+    unsigned char value;
+    unsigned int hcode;
+    unsigned char codelength;
+} CompressedNode;
+
+#pragma endregion Private Structs
+
+#pragma region Private Functions
+
+#pragma region Utilities
 
 /// @brief Compares the values of two nodes within the huffman tree
 /// @param node1 The first node to compare
@@ -97,9 +120,46 @@ unsigned int ReverseLowerNBits(unsigned int num, unsigned int n)
     return (num & ~mask) | result;
 }
 
-/*
-    PUBLIC FUNCTIONS:
-*/
+/// @brief Gets the index into ht->tree for the given symbol value
+/// @param ht The huffman tree to search through
+/// @param value Tee value (byte symbol) to find
+/// @return If successful, the index to the symbol value. If not found, -1
+int GetCodeFromCharacter(HuffmanTree *ht, unsigned char value)
+{
+    for (int i = 0; i < ht->count; i++)
+    {
+        if (ht->tree[i]->value == value && ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/// @brief Gets the symbol value in the huffman tree, given the code and the length of the code
+/// @param ht The huffman tree to search through
+/// @param code The integer value of the code
+/// @param len The length of the code
+/// @return If successful, the symbol value (byte) from the code. -1 if not successful
+int GetCharacterFromCode(HuffmanTree *ht, unsigned int code, unsigned char len)
+{
+    for (int i = 0; i < ht->count; i++)
+    {
+        // if the value and the length is correct
+        if (ht->tree[i]->hcode == code && ht->tree[i]->codelength == len)
+        { // and there are no left/right children (it is a symbol node)
+            if (ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
+            {
+                return ht->tree[i]->value;
+            }
+        }
+    }
+    return -1;
+}
+
+#pragma endregion Utilities
+
+#pragma region InitFree
 
 /// @brief Initializes huffman tree object
 /// @return pointer to huffman tree, or NULL on failure
@@ -119,12 +179,140 @@ HuffmanTree *InitHT()
     return ht;
 }
 
+HuffmanTree *InitHTLight()
+{
+    HuffmanTree *ht = (HuffmanTree *)calloc(1, sizeof(HuffmanTree));
+    if (ht == NULL)
+    {
+        return NULL;
+    }
+    return ht;
+}
+
+/// @brief Frees all memory associated with the huffmane tree
+/// @param ht huffman tree to free
+/// @return if successful, 0, if failed -1
+int FreeHT(HuffmanTree *ht)
+{
+    if (ht == NULL)
+    {
+        printf("Cannot free null tree!\n");
+        return -1;
+    }
+
+    for (int i = 0; i < ht->count; i++)
+    {
+        free(ht->tree[i]);
+    }
+    free(ht);
+    return 0;
+}
+
+#pragma endregion InitFree
+
+#pragma region Debug
+
+/// @brief Prints basic tree information
+/// @param ht Tree to print from
+/// @param opening String used to set an opening preamble to tree info
+void PrintTreeInformation(HuffmanTree *ht, const char *opening)
+{
+    printf("%s", opening);
+    printf("Huffman Tree Stats:\n");
+    printf("ByteCount: %u\n", ht->bytecount);
+    printf("Count: %u\n", ht->count);
+    printf("Max Freq: %u\n", ht->maxfreq);
+    if (ht->root == NULL)
+    {
+        printf("\n");
+        return;
+    }
+    printf("Root Node info:\n");
+    printf("Value: %u\tFrequency: %u\n", ht->root->value, ht->root->frequency);
+    printf("Left Child: %p\tRight Child: %p\n", (void *)ht->root->left, (void *)ht->root->right);
+    printf("\n");
+}
+
+/// @brief Prints the information of all the nodes currently within the tree
+/// @param ht The huffman tree to print
+/// @return if success, 0; if failed, -1
+int PrintNodes(HuffmanTree *ht)
+{
+    if (ht == NULL)
+    {
+        printf("Cannot print null tree!\n");
+        return -1;
+    }
+    int scount = 0;
+
+    printf("Printing tree from root down:\n\n");
+    for (int i = ht->count - 1; i >= 0; i--)
+    {
+        unsigned int hcode = ht->tree[i]->hcode;
+        printf("Node #%d @ addr: %p\t\tLeft: %p\t\tRight: %p\n", (ht->count - 1) - i, (void *)ht->tree[i], (void *)ht->tree[i]->left, (void *)ht->tree[i]->right);
+        printf("HCode of len %d:\t%u =>\t", ht->tree[i]->codelength, hcode);
+        for (int i = 31; i >= 0; i--)
+        {
+            printf("%u", (hcode >> i) & 0x01);
+            scount++;
+            if (scount == 4)
+            {
+                printf(" ");
+                scount = 0;
+            }
+        }
+        printf("\n");
+        printf("Val: %u/%c   \tFreq: %u\n\n", ht->tree[i]->value, ht->tree[i]->value, ht->tree[i]->frequency);
+    }
+    printf("\n");
+
+    return 0;
+}
+
+int PrintNode(HuffmanTree *ht, int index, const char *opening)
+{
+    if (index > 511 || index >= ht->count)
+    {
+        return -1;
+    }
+    int scount = 0;
+
+    unsigned int hcode = ht->tree[index]->hcode;
+    printf("%s", opening);
+    printf("Node of index %d @ addr: %p\t\tLeft: %p\t\tRight: %p\n", index, (void *)ht->tree[index], (void *)ht->tree[index]->left, (void *)ht->tree[index]->right);
+    printf("HCode of len %d:\t%u =>\t", ht->tree[index]->codelength, hcode);
+    for (int i = 31; i >= 0; i--)
+    {
+        printf("%u", (hcode >> i) & 0x01);
+        scount++;
+        if (scount == 4)
+        {
+            printf(" ");
+            scount = 0;
+        }
+    }
+    printf("\n");
+    printf("Val: %u   \tFreq: %u\n\n", ht->tree[index]->value, ht->tree[index]->frequency);
+    return 0;
+}
+
+void HTFailure()
+{
+}
+
+#pragma endregion Debug
+
+#pragma region Compression
+
 /// @brief Traverses through a file and counts the number of each byte. Resets input stream to start of file
 /// @param inputFile The pointer to the input file stream
 /// @param FreqTable Table of 256 unsigned ints
 /// @return 0 if successful
 int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht)
 {
+    unsigned char symbol;
+    SymbolReader symbolTable[BYTEMAX];
+
     if (inputFile == NULL || ht == NULL)
     {
         printf("%p\t%p\n", inputFile, ht);
@@ -132,8 +320,6 @@ int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht)
         printf("Cannot parse for null file or tree!\n");
         return -1;
     }
-    unsigned char symbol;
-    SymbolReader symbolTable[BYTEMAX];
 
     for (int i = 0; i < BYTEMAX; i++)
     {
@@ -165,7 +351,6 @@ int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht)
             ht->tree[ht->count]->right = NULL;
             ht->tree[ht->count]->hcode = 0;
             ht->tree[ht->count]->codelength = 0;
-
             ht->count++;
 
             // Check if max
@@ -227,64 +412,29 @@ int BuildHTFromFrequencies(HuffmanTree *ht)
     }
 }
 
-/// @brief Gets the index into ht->tree for the given symbol value
-/// @param ht The huffman tree to search through
-/// @param value Tee value (byte symbol) to find
-/// @return If successful, the index to the symbol value. If not found, -1
-int GetCodeFromCharacter(HuffmanTree *ht, unsigned char value)
+int WriteCompressedTreeToFile(HuffmanTree *ht, FILE *output)
 {
+    unsigned int nodeCount = 0;
+    CompressedNode hnodes[BYTEMAX];
     for (int i = 0; i < ht->count; i++)
     {
-        if (ht->tree[i]->value == value && ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
+        if (ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
         {
-            return i;
+            hnodes[nodeCount].value = ht->tree[i]->value;
+            hnodes[nodeCount].hcode = ht->tree[i]->hcode;
+            hnodes[nodeCount].codelength = ht->tree[i]->codelength;
+            nodeCount++;
         }
     }
-    return -1;
-}
+    fwrite(&nodeCount, sizeof(unsigned int), 1, output);
+    fwrite(&hnodes, sizeof(CompressedNode), nodeCount, output);
 
-/// @brief Gets the symbol value in the huffman tree, given the code and the length of the code
-/// @param ht The huffman tree to search through
-/// @param code The integer value of the code
-/// @param len The length of the code
-/// @return If successful, the symbol value (byte) from the code. -1 if not successful
-int GetCharacterFromCode(HuffmanTree *ht, unsigned int code, unsigned char len)
-{
-    for (int i = 0; i < ht->count; i++)
-    {
-        // if the value and the length is correct
-        if (ht->tree[i]->hcode == code && ht->tree[i]->codelength == len)
-        { // and there are no left/right children (it is a symbol node)
-            if (ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
-            {
-                return ht->tree[i]->value;
-            }
-        }
-    }
-    return -1;
-}
-
-/// @brief Frees all memory associated with the huffmane tree
-/// @param ht huffman tree to free
-/// @return if successful, 0, if failed -1
-int FreeHT(HuffmanTree *ht)
-{
-    if (ht == NULL)
-    {
-        printf("Cannot free null tree!\n");
-        return -1;
-    }
-
-    for (int i = 0; i < ht->count; i++)
-    {
-        free(ht->tree[i]);
-    }
-    free(ht);
     return 0;
 }
 
 int WriteTreeToFile(HuffmanTree *ht, FILE *output)
 {
+
     // Write the huffman tree to the file so that it can be used on decode
     fwrite(ht, sizeof(HuffmanTree), 1, output);
 
@@ -298,14 +448,8 @@ int WriteTreeToFile(HuffmanTree *ht, FILE *output)
 
 int WriteDataToFile(HuffmanTree *ht, FILE *input, FILE *output)
 {
-    unsigned char inbyte = 0;
-    unsigned char outbyte = 0;
-    unsigned int hcode = 0;
-    int index = 0;
-    unsigned char bitsinbyte = 0;
-    unsigned char thisbytebits = 0;
-
-    int counter = 0;
+    unsigned char inbyte = 0, outbyte = 0, bitsinbyte = 0, thisbytebits = 0;
+    unsigned int hcode = 0, index = 0, counter = 0;
 
     // read bytes from file
     while (fread(&inbyte, sizeof(unsigned char), 1, input))
@@ -356,6 +500,30 @@ int WriteDataToFile(HuffmanTree *ht, FILE *input, FILE *output)
     return 0;
 }
 
+#pragma endregion Compression
+
+#pragma region Decompression
+
+HuffmanTree *ReadCompressedTreeFromFile(FILE *input)
+{
+    HuffmanTree *ht = InitHTLight();
+    if (ht == NULL)
+        return NULL;
+
+    fread(&ht->count, sizeof(unsigned int), 1, input);
+    for (int i = 0; i < ht->count; i++)
+    {
+        CompressedNode cnode;
+        HuffmanNode *hnode = (HuffmanNode *)calloc(1, sizeof(HuffmanNode));
+        fread(&cnode, sizeof(CompressedNode), 1, input);
+        hnode->value = cnode.value;
+        hnode->codelength = cnode.codelength;
+        hnode->hcode = cnode.hcode;
+        ht->tree[i] = hnode;
+    }
+    return ht;
+}
+
 /// @brief Reads the Huffman tree from a file and restores it's structure, except for the pointers between nodes
 /// @param input
 /// @return
@@ -386,202 +554,88 @@ HuffmanTree *ReadTreeFromFile(FILE *input)
 
 int ReadDataFromFile(HuffmanTree *ht, FILE *input, FILE *output)
 {
-    unsigned char lastchar = 0;
-    unsigned char outbyte = 0;
-    unsigned char inbyte = 0;
+    unsigned char inbyte = 0, bb = 0;
     unsigned int hcode = 0, revhcode = 0;
-    int index = 0, hcodelen = 0;
-    int hcodevalue = 0;
-    unsigned char bb = 0;
+    int idx = 0, hlen = 0, hvalue = 0, bit = 0, bitc = 8;
+    unsigned long start, len, count = 0;
 
-    // Get the size of the data in bytes
-    long start = ftell(input);              // start loc
-    fseek(input, 0, SEEK_END);              // go to end
-    long length = ftell(input) - start - 1; // num bytes = end - start - bb
+    start = ftell(input);
+    fseek(input, 0, SEEK_END);
+    len = ftell(input) - start - 1;
     fseek(input, start, SEEK_SET);
 
-    // for every character in the file (except the final one)
-    for (long bc = 0; bc < length - 1; bc++)
+    for (count = 0; count < len; count++)
     {
-        // read a character in
         fread(&inbyte, sizeof(unsigned char), 1, input);
-
-        // For each bit in the character
-        for (int bit = 0; bit < 8; bit++)
+        if (count == len - 1)
         {
-            // set the LSB of inbyte to LSB of hcode
-            hcode = (inbyte & 0x01) | (hcode & 0xFFFFFFFE);
-            hcodelen++;
-            revhcode = 0; // rst the reversal int each time, val is stored in hcode
-            // this is such a stupid solution, but it should work (update: it did, hallelujah)
-            revhcode = ReverseLowerNBits(hcode, hcodelen);
-            hcodevalue = GetCharacterFromCode(ht, revhcode, hcodelen);
-
-            // if the code is not valid
-            if (hcodevalue == -1)
+            fread(&bb, sizeof(unsigned char), 1, input);
+            if (bb != 0)
             {
-                hcode <<= 1; // make space for new bit
-                inbyte >>= 1;
-            }
-            else // hcode exists within tree
-            {
-                // printf("Writing char %c with value %u\n", hcodevalue, hcodevalue);
-                fwrite(&hcodevalue, sizeof(unsigned char), 1, output);
-                // reset hcode properties
-                hcodelen = 0;
-                hcode = 0;
-                inbyte >>= 1; // read a char so shift
+                inbyte >>= (8 - bb);
+                bitc = bb;
             }
         }
-    }
-    // at this point, we have either none of, or some of the final hcode in hcode
-    // and the data or the remaining portion of the data as the next char. bb determines
-    // how many bits we need to shift by to get rid of the padding
-    // handle final char of data
-    fread(&inbyte, sizeof(unsigned char), 1, input);
-    fread(&bb, sizeof(unsigned char), 1, input);
-    // get rid of excess padding on last byte
-    if (bb != 0) // should be able to get rid of the if
-    {
-        for (int i = 0; i < 8 - bb; i++)
-        {
-            inbyte >>= 1;
-        }
-
-        // load last char into hcode
-        for (int i = 0; i < bb; i++)
+        for (bit = 0; bit < bitc; bit++)
         {
             hcode = (inbyte & 0x01) | (hcode & 0xFFFFFFFE);
-            hcodelen++;
+            hlen++;
             revhcode = 0;
-            revhcode = ReverseLowerNBits(hcode, hcodelen);
-            hcodevalue = GetCharacterFromCode(ht, revhcode, hcodelen);
-
-            if (hcodevalue == -1)
+            revhcode = ReverseLowerNBits(hcode, hlen);
+            hvalue = GetCharacterFromCode(ht, revhcode, hlen);
+            if (hvalue == -1)
             {
                 hcode <<= 1;
                 inbyte >>= 1;
             }
             else
             {
-                fwrite(&hcodevalue, sizeof(unsigned char), 1, output);
-                hcodelen = 0;
+                fwrite(&hvalue, sizeof(unsigned char), 1, output);
+                hlen = 0;
                 hcode = 0;
                 inbyte >>= 1;
             }
         }
     }
-    else // if bits in byte are zero, then we need to do something special-er
-    {
-        for (int bit = 0; bit < 8; bit++) // just copy this it should work?
-        {
-            // set the LSB of inbyte to LSB of hcode
-            hcode = (inbyte & 0x01) | (hcode & 0xFFFFFFFE);
-            hcodelen++;
-            revhcode = 0;
-            revhcode = ReverseLowerNBits(hcode, hcodelen);
-            hcodevalue = GetCharacterFromCode(ht, revhcode, hcodelen);
+    return 0;
+}
 
-            // if the code is not valid
-            if (hcodevalue == -1)
-            {
-                hcode <<= 1; // make space for new bit
-                inbyte >>= 1;
-            }
-            else // hcode exists within tree
-            {
-                fwrite(&hcodevalue, sizeof(unsigned char), 1, output);
-                // reset hcode properties
-                hcodelen = 0;
-                hcode = 0;
-                inbyte >>= 1; // read a char so shift
-            }
-        }
+#pragma endregion Decompression
+
+#pragma endregion Private Functions
+
+#pragma region Public Functions
+
+/// @brief Does huffman tree based compression on an input file. The compressed file is output with the suffix .hf
+/// @param input THe file to compress.
+/// @return 0 upon success, failure on any other
+int DoHTCompression(FILE *input, bool optimized)
+{
+    if (optimized)
+    {
+        /* code */
+    }
+    else if (!optimized)
+    {
     }
 
     return 0;
 }
 
-/// @brief Prints basic tree information
-/// @param ht Tree to print from
-/// @param opening String used to set an opening preamble to tree info
-void PrintTreeInformation(HuffmanTree *ht, const char *opening)
+/// @brief Does huffman tree based decompression on an input file. THe decompressed file is output with the suffix .u
+/// @param input The file to decompress
+/// @return 0 upon success, failure on any other
+int DoHTDecompression(FILE *input, bool optimized)
 {
-    printf("%s", opening);
-    printf("Huffman Tree Stats:\n");
-    printf("ByteCount: %u\n", ht->bytecount);
-    printf("Count: %u\n", ht->count);
-    printf("Max Freq: %u\n", ht->maxfreq);
-    if (ht->root == NULL)
+    if (optimized)
     {
-        printf("\n");
-        return;
+        /* code */
     }
-    printf("Root Node info:\n");
-    printf("Value: %u\tFrequency: %u\n", ht->root->value, ht->root->frequency);
-    printf("Left Child: %p\tRight Child: %p\n", (void *)ht->root->left, (void *)ht->root->right);
-    printf("\n");
-}
-
-/// @brief Prints the information of all the nodes currently within the tree
-/// @param ht The huffman tree to print
-/// @return if success, 0; if failed, -1
-int PrintNodes(HuffmanTree *ht)
-{
-    if (ht == NULL)
+    else if (!optimized)
     {
-        printf("Cannot print null tree!\n");
-        return -1;
     }
-    int scount = 0;
-
-    printf("Printing tree from root down:\n\n");
-    for (int i = ht->count - 1; i >= 0; i--)
-    {
-        unsigned int hcode = ht->tree[i]->hcode;
-        printf("Node #%d @ addr: %p\t\tLeft: %p\t\tRight: %p\n", (ht->count - 1) - i, (void *)ht->tree[i], (void *)ht->tree[i]->left, (void *)ht->tree[i]->right);
-        printf("HCode of length %d:\t%u =>\t", ht->tree[i]->codelength, hcode);
-        for (int i = 31; i >= 0; i--)
-        {
-            printf("%u", (hcode >> i) & 0x01);
-            scount++;
-            if (scount == 4)
-            {
-                printf(" ");
-                scount = 0;
-            }
-        }
-        printf("\n");
-        printf("Val: %u/%c   \tFreq: %u\n\n", ht->tree[i]->value, ht->tree[i]->value, ht->tree[i]->frequency);
-    }
-    printf("\n");
 
     return 0;
 }
 
-int PrintNode(HuffmanTree *ht, int index, const char *opening)
-{
-    if (index > 511 || index >= ht->count)
-    {
-        return -1;
-    }
-    int scount = 0;
-
-    unsigned int hcode = ht->tree[index]->hcode;
-    printf("%s", opening);
-    printf("Node of index %d @ addr: %p\t\tLeft: %p\t\tRight: %p\n", index, (void *)ht->tree[index], (void *)ht->tree[index]->left, (void *)ht->tree[index]->right);
-    printf("HCode of length %d:\t%u =>\t", ht->tree[index]->codelength, hcode);
-    for (int i = 31; i >= 0; i--)
-    {
-        printf("%u", (hcode >> i) & 0x01);
-        scount++;
-        if (scount == 4)
-        {
-            printf(" ");
-            scount = 0;
-        }
-    }
-    printf("\n");
-    printf("Val: %u   \tFreq: %u\n\n", ht->tree[index]->value, ht->tree[index]->frequency);
-    return 0;
-}
+#pragma endregion Public Functions
