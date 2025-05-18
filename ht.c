@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#include "ht-optimized.h"
+#include "ht.h"
 
 #define HTSIZE 512
 #define BYTEMAX 256
