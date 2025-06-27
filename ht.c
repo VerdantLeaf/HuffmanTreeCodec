@@ -7,21 +7,6 @@
 #define HTSIZE 512
 #define BYTEMAX 256
 
-/*
-    Optimizations completed:
-        * Decompression algorithm is ~40 lines shorter, by including final byte logic in main loop
-        * Compression now saves the count of nodes and "CompressedNode" - Saves ~7kB on compression of golfcore.ppm
-        * Writes all of the nodes in one fwrite, decreases exe size and improves size
-
-    OPTIMIZATIONS TO MAKE:
-    * Change how compression writes HCodes to prepend bits instead of append
-    *   Eliminating need to reverse N lower bits on decompression
-    * Reduce API to just compress and decompress
-    * Comprehensive devug/failure print function
-    *
-    *
-*/
-
 #pragma region Private Structs
 
 /// @brief Struct to track frequency of value and if the value has been seen

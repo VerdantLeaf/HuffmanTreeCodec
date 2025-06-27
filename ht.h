@@ -1,8 +1,6 @@
 #ifndef HUFFTREE_H
 #define HUFFTREE_H
 
-#include <stdbool.h>
-
 typedef struct HuffmanNode HuffmanNode;
 typedef struct HuffmanTree HuffmanTree;
 
@@ -26,8 +24,8 @@ typedef struct HuffmanTree
 } HuffmanTree;
 
 // funcs
-int DoHTCompression(FILE *fp, bool optimized);
-int DoHTDecompression(FILE *fp, bool optimized);
+int DoHTCompression(FILE *fp);
+int DoHTDecompression(FILE *fp);
 
 HuffmanTree *InitHT();
 int FreeHT(HuffmanTree *ht);
