@@ -609,15 +609,8 @@ int ReadDataFromFile(HuffmanTree *ht, FILE *input, FILE *output)
 /// @brief Does huffman tree based compression on an input file. The compressed file is output with the suffix .hf
 /// @param input THe file to compress.
 /// @return 0 upon success, failure on any other
-int DoHTCompression(FILE *input, bool optimized)
+int DoHTCompression(FILE *input)
 {
-    if (optimized)
-    {
-        /* code */
-    }
-    else if (!optimized)
-    {
-    }
 
     return 0;
 }
@@ -625,15 +618,8 @@ int DoHTCompression(FILE *input, bool optimized)
 /// @brief Does huffman tree based decompression on an input file. THe decompressed file is output with the suffix .u
 /// @param input The file to decompress
 /// @return 0 upon success, failure on any other
-int DoHTDecompression(FILE *input, bool optimized)
+int DoHTDecompression(FILE *input)
 {
-    if (optimized)
-    {
-        /* code */
-    }
-    else if (!optimized)
-    {
-    }
 
     return 0;
 }
