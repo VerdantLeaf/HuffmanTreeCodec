@@ -37,6 +37,7 @@ typedef struct
 /// @return 1 if N1 > N2, -1 if N1 < N2, 0 if N1 == N2
 int CompareNodes(const void *node1, const void *node2)
 {
+    /// @todo I think this could be simpler, pointers wise
     HuffmanNode *N1 = *((HuffmanNode **)node1);
     HuffmanNode *N2 = *((HuffmanNode **)node2);
 
@@ -60,8 +61,7 @@ int UpdateHCodesBelow(HuffmanNode *parent, int appendbit)
     }
     else
     {
-        // append a 1 to the hcodes
-        if (appendbit)
+        if (appendbit) // append a 1 to the hcodes
         {
             parent->left->hcode = (parent->left->hcode << 1) | 0x00000001;
             parent->right->hcode = (parent->right->hcode << 1) | 0x00000001;
@@ -87,6 +87,7 @@ int UpdateHCodesBelow(HuffmanNode *parent, int appendbit)
 /// @return the reversed number
 unsigned int ReverseLowerNBits(unsigned int num, unsigned int n)
 {
+    /// @todo Make this entire function unneeded
     unsigned int result = 0;
     unsigned int mask = (1U << n) - 1; // Mask for the lower N bits
     // First, isolate the lower N bits
@@ -111,6 +112,7 @@ unsigned int ReverseLowerNBits(unsigned int num, unsigned int n)
 /// @return If successful, the index to the symbol value. If not found, -1
 int GetCodeFromCharacter(HuffmanTree *ht, unsigned char value)
 {
+    /// @todo Make this more efficient (Start at top of tree? Binary search?)
     for (int i = 0; i < ht->count; i++)
     {
         if (ht->tree[i]->value == value && ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
@@ -128,6 +130,7 @@ int GetCodeFromCharacter(HuffmanTree *ht, unsigned char value)
 /// @return If successful, the symbol value (byte) from the code. -1 if not successful
 int GetCharacterFromCode(HuffmanTree *ht, unsigned int code, unsigned char len)
 {
+    /// @todo See GetCodeFromCharacter
     for (int i = 0; i < ht->count; i++)
     {
         // if the value and the length is correct
@@ -155,6 +158,7 @@ HuffmanTree *InitHT()
     {
         return NULL;
     }
+    /// @todo Unroll this loop for performance
     // set all values to null
     for (int i = 0; i < HTSIZE; i++)
     {
@@ -184,7 +188,7 @@ int FreeHT(HuffmanTree *ht)
         printf("Cannot free null tree!\n");
         return -1;
     }
-
+    /// @todo Unroll loop for performance
     for (int i = 0; i < ht->count; i++)
     {
         free(ht->tree[i]);
@@ -305,13 +309,13 @@ int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht)
         printf("Cannot parse for null file or tree!\n");
         return -1;
     }
-
+    /// @todo Unroll for performance
     for (int i = 0; i < BYTEMAX; i++)
     {
         symbolTable[i].seen = false;
         symbolTable[i].frequency = 0;
     }
-    // just count symbols and then update table
+    // First pass: just count symbols and then update table
     while (fread(&symbol, sizeof(unsigned char), 1, inputFile))
     {
         if (!symbolTable[symbol].seen)
@@ -323,6 +327,7 @@ int InitializeLeafNodes(FILE *inputFile, HuffmanTree *ht)
     }
     ht->count = 0;
 
+    /// @todo Unroll for performance
     for (int character = 0; character < BYTEMAX; character++)
     {
         // if the symbol was seen
@@ -356,6 +361,7 @@ int BuildHTFromFrequencies(HuffmanTree *ht)
 {
     unsigned int numInternalNodes = 0, numLeafNodes = ht->count, numNodesProcessed = 0;
 
+    /// @todo Can make this more efficient with min heap and not need to sort each time.
     qsort(ht->tree, ht->count, sizeof(HuffmanNode *), CompareNodes); // qsort each of the leaf nodes to sort from min to max freqs
 
     while (numInternalNodes < (numLeafNodes - 1))
@@ -401,6 +407,7 @@ int WriteCompressedTreeToFile(HuffmanTree *ht, FILE *output)
 {
     unsigned int nodeCount = 0;
     CompressedNode hnodes[BYTEMAX];
+    /// @todo Unroll for performance
     for (int i = 0; i < ht->count; i++)
     {
         if (ht->tree[i]->left == NULL && ht->tree[i]->right == NULL)
@@ -419,10 +426,10 @@ int WriteCompressedTreeToFile(HuffmanTree *ht, FILE *output)
 
 int WriteTreeToFile(HuffmanTree *ht, FILE *output)
 {
-
     // Write the huffman tree to the file so that it can be used on decode
     fwrite(ht, sizeof(HuffmanTree), 1, output);
 
+    /// @todo Unroll for performance
     for (int i = 0; i < ht->count; i++)
     {
         fwrite(ht->tree[i], sizeof(HuffmanNode), 1, output);
